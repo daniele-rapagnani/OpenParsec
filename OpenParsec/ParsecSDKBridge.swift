@@ -108,6 +108,8 @@ class ParsecSDKBridge: ParsecService {
 	private let _audioPtr: UnsafeRawPointer
 
 	private var isVirtualShiftOn = false
+	// modifiers held down with the on-screen key bar, as ParsecKeymod flags
+	private var virtualMods: UInt32 = 0
 
 	public var clientWidth: Float = 1920
 	public var clientHeight: Float = 1080
@@ -247,6 +249,7 @@ class ParsecSDKBridge: ParsecService {
 		msg.type = MESSAGE_RELEASE
 		ParsecClientSendMessage(_parsec, &msg)
 		isVirtualShiftOn = false
+		virtualMods = 0
 		DispatchQueue.main.async {
 			NotificationCenter.default.post(name: NSNotification.Name("ParsecInputReleased"), object: nil)
 		}
@@ -594,21 +597,24 @@ class ParsecSDKBridge: ParsecService {
 		var keyboardMessagePress = ParsecMessage()
 		keyboardMessagePress.type = MESSAGE_KEYBOARD
 		let sendShift = !isVirtualShiftOn && useShift
+		// The host takes held modifiers from `mod`, so keys typed while the key bar's Ctrl/Alt/etc. are on must carry them.
+		let heldMods = virtualMods
+		let keyMods = sendShift ? heldMods | MOD_LSHIFT.rawValue : heldMods
 		if sendShift {
-			keyboardMessagePress.keyboard = ParsecKeyboardMessage(code: KEY_LSHIFT, mod: MOD_NONE, pressed: true, __pad: (0, 0, 0))
+			keyboardMessagePress.keyboard = ParsecKeyboardMessage(code: KEY_LSHIFT, mod: ParsecKeymod(rawValue: keyMods), pressed: true, __pad: (0, 0, 0))
 			ParsecClientSendMessage(_parsec, &keyboardMessagePress)
 		}
-		keyboardMessagePress.keyboard = ParsecKeyboardMessage(code: keyCode, mod: MOD_NONE, pressed: true, __pad: (0, 0, 0))
+		keyboardMessagePress.keyboard = ParsecKeyboardMessage(code: keyCode, mod: ParsecKeymod(rawValue: keyMods), pressed: true, __pad: (0, 0, 0))
 		ParsecClientSendMessage(_parsec, &keyboardMessagePress)
 
 		// add release delay in case some games ignore instant key release
 		DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
 			var release = ParsecMessage()
 			release.type = MESSAGE_KEYBOARD
-			release.keyboard = ParsecKeyboardMessage(code: keyCode, mod: MOD_NONE, pressed: false, __pad: (0, 0, 0))
+			release.keyboard = ParsecKeyboardMessage(code: keyCode, mod: ParsecKeymod(rawValue: keyMods), pressed: false, __pad: (0, 0, 0))
 			ParsecClientSendMessage(self._parsec, &release)
 			if sendShift {
-				release.keyboard = ParsecKeyboardMessage(code: KEY_LSHIFT, mod: MOD_NONE, pressed: false, __pad: (0, 0, 0))
+				release.keyboard = ParsecKeyboardMessage(code: KEY_LSHIFT, mod: ParsecKeymod(rawValue: heldMods), pressed: false, __pad: (0, 0, 0))
 				ParsecClientSendMessage(self._parsec, &release)
 			}
 		}
@@ -625,12 +631,56 @@ class ParsecSDKBridge: ParsecService {
 			isVirtualShiftOn = isOn
 		}
 
+		let flag = Self.modifierFlag(keyCode)
+		if isOn {
+			virtualMods |= flag
+		} else {
+			virtualMods &= ~flag
+		}
+
 		var keyboardMessagePress = ParsecMessage()
 		keyboardMessagePress.type = MESSAGE_KEYBOARD
 		keyboardMessagePress.keyboard.pressed = isOn
 		keyboardMessagePress.keyboard.code = keyCode
+		keyboardMessagePress.keyboard.mod = ParsecKeymod(rawValue: virtualMods)
 		ParsecClientSendMessage(_parsec, &keyboardMessagePress)
 
+	}
+
+	// Press the keys in order, then release them in reverse, e.g. Ctrl+Alt+Del.
+	func sendKeyCombo(_ keyCodes: [ParsecKeycode]) {
+		var mods: UInt32 = 0
+		var press = ParsecMessage()
+		press.type = MESSAGE_KEYBOARD
+		for code in keyCodes {
+			mods |= Self.modifierFlag(code)
+			press.keyboard = ParsecKeyboardMessage(code: code, mod: ParsecKeymod(rawValue: mods), pressed: true, __pad: (0, 0, 0))
+			ParsecClientSendMessage(_parsec, &press)
+		}
+
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+			var release = ParsecMessage()
+			release.type = MESSAGE_KEYBOARD
+			for code in keyCodes.reversed() {
+				mods &= ~Self.modifierFlag(code)
+				release.keyboard = ParsecKeyboardMessage(code: code, mod: ParsecKeymod(rawValue: mods), pressed: false, __pad: (0, 0, 0))
+				ParsecClientSendMessage(self._parsec, &release)
+			}
+		}
+	}
+
+	private static func modifierFlag(_ code: ParsecKeycode) -> UInt32 {
+		switch code {
+		case KEY_LCTRL: return MOD_LCTRL.rawValue
+		case KEY_LSHIFT: return MOD_LSHIFT.rawValue
+		case KEY_LALT: return MOD_LALT.rawValue
+		case KEY_LGUI: return MOD_LGUI.rawValue
+		case KEY_RCTRL: return MOD_RCTRL.rawValue
+		case KEY_RSHIFT: return MOD_RSHIFT.rawValue
+		case KEY_RALT: return MOD_RALT.rawValue
+		case KEY_RGUI: return MOD_RGUI.rawValue
+		default: return 0
+		}
 	}
 
 	func sendKeyboardMessage(event: KeyBoardKeyEvent) {

@@ -38,6 +38,8 @@ Hardware mice and keyboards are supported.
 
 Option Key as Command can be turned on in Settings for Mac hosts.
 
+Ctrl+Alt+Del and Ctrl+Alt+End can be sent from Send Keys in the stream menu, e.g. to unlock a Windows host.
+
 ## Game Controllers
 One controller is supported. Pressing any trigger during a stream registers it with Parsec. The host needs the virtual USB driver installed.
 

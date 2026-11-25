@@ -593,6 +593,20 @@ struct ParsecView: View {
 						}
 					}
 
+					Menu {
+						Button("Ctrl+Alt+Del") {
+							CParsec.sendKeyCombo([KEY_LCTRL, KEY_LALT, KEY_DELETE])
+						}
+						Button("Ctrl+Alt+End") {
+							CParsec.sendKeyCombo([KEY_LCTRL, KEY_LALT, KEY_END])
+						}
+					} label: {
+						Text("Send Keys")
+							.padding(8)
+							.frame(maxWidth: .infinity)
+							.multilineTextAlignment(.center)
+					}
+
 					Button(action: toggleConstantFps) {
 						Text("Constant Frame Rate: \(dataModel.constantFps ? "ON" : "OFF")")
 							.padding(8)
