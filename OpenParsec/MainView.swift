@@ -812,6 +812,7 @@ struct MainView: View {
 	func logout() {
 		removeFromKeychain(key: GLBDataModel.shared.SessionKeyChainKey)
 		NetworkHandler.clinfo = nil
+		SAMLLogin.clearWebData()
 		ParsecBackgroundManager.shared.disableAutoReconnect()
 		if let c = controller {
 			c.setView(.login)

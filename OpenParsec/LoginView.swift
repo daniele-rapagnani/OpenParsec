@@ -12,6 +12,10 @@ struct LoginView: View {
 	@State var isLoading: Bool = false
 	@State var showAlert: Bool = false
 	@State var alertText: String = ""
+	@State private var presentSAMLPrompt = false
+	@State private var samlRequired = false
+	@State private var inputTeamID: String = SAMLLogin.lastTeamID
+	@State private var samlRequest: SAMLRequest?
 
 	init(_ controller: ContentView?) {
 		self.controller = controller
@@ -61,6 +65,12 @@ struct LoginView: View {
 					}
 					.frame(height: 54)
 				}
+				Button(action: { showSAMLPrompt(required: false) }) {
+					Text("Log in with SAML SSO")
+						.foregroundColor(Color("AccentColor"))
+						.frame(maxWidth: .infinity)
+						.frame(height: 44)
+				}
 			}
 
 			.padding()
@@ -68,7 +78,7 @@ struct LoginView: View {
 			.disabled(isLoading) // Disable when loading
 
 			// Loading elements
-			if isLoading || presentTFAAlert {
+			if isLoading || presentTFAAlert || presentSAMLPrompt {
 				ZStack {
 					Rectangle() // Darken background
 						.fill(Color.black)
@@ -113,6 +123,40 @@ struct LoginView: View {
 									.frame(height: 54)
 								}
 							}
+						} else if presentSAMLPrompt {
+							Text(samlRequired
+								? "Your account requires SAML single sign-on. Enter your team ID or SAML alias to continue."
+								: "Enter your team ID or SAML alias")
+								.multilineTextAlignment(.center)
+							TextField("Team ID", text: $inputTeamID, onCommit: { startSAML() })
+								.padding()
+								.background(Rectangle().fill(Color("BackgroundField")))
+								.foregroundColor(Color("Foreground"))
+								.cornerRadius(8)
+								.disableAutocorrection(true)
+								.autocapitalization(.none)
+							HStack {
+								Button(action: {presentSAMLPrompt = false}) {
+									ZStack {
+										Rectangle()
+											.fill(Color("BackgroundButton"))
+											.cornerRadius(8)
+										Text("Cancel")
+											.foregroundColor(Color("Foreground"))
+									}
+									.frame(height: 54)
+								}
+								Button(action: {startSAML()}) {
+									ZStack {
+										Rectangle()
+											.fill(Color("AccentColor"))
+											.cornerRadius(8)
+										Text("Continue")
+											.foregroundColor(.white)
+									}
+									.frame(height: 54)
+								}
+							}
 						}
 					}
 					.padding()
@@ -126,12 +170,26 @@ struct LoginView: View {
 		.alert(isPresented: $showAlert) {
 			Alert(title: Text("Login Failed"), message: Text(alertText))
 		}
+		.sheet(item: $samlRequest) { req in
+			SAMLLoginSheet(
+				url: req.url,
+				onToken: { token in
+					samlRequest = nil
+					finishSAML(token)
+				},
+				onError: { message in
+					samlRequest = nil
+					showAlertAfterSheet(message)
+				},
+				onCancel: { samlRequest = nil }
+			)
+		}
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in retryRestore() }
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.protectedDataDidBecomeAvailableNotification)) { _ in retryRestore() }
 	}
 
 	func retryRestore() {
-		if !isLoading && !presentTFAAlert, let c = controller {
+		if !isLoading && !presentTFAAlert && !presentSAMLPrompt && samlRequest == nil, let c = controller {
 			c.retryRestore()
 		}
 	}
@@ -145,6 +203,75 @@ struct LoginView: View {
 			return
 		}
 		print("Data saved to Keychain.")
+	}
+
+	func showSAMLPrompt(required: Bool) {
+		samlRequired = required
+		if inputTeamID.isEmpty {
+			inputTeamID = SAMLLogin.lastTeamID
+		}
+		presentSAMLPrompt = true
+	}
+
+	func startSAML() {
+		let teamID = inputTeamID.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !teamID.isEmpty else { return }
+
+		presentSAMLPrompt = false
+		withAnimation { isLoading = true }
+
+		SAMLLogin.start(teamID: teamID) { result in
+			isLoading = false
+			switch result {
+			case .success(let url):
+				SAMLLogin.lastTeamID = teamID
+				samlRequest = SAMLRequest(url: url)
+			case .failure(let failure):
+				alertText = failure.message
+				showAlert = true
+			}
+		}
+	}
+
+	func finishSAML(_ signedToken: String) {
+		withAnimation { isLoading = true }
+
+		SAMLLogin.finish(signedToken: signedToken) { result in
+			switch result {
+			case .success(let data):
+				completeLogin(data)
+			case .failure(let failure):
+				showAlertAfterSheet(failure.message)
+			}
+		}
+	}
+
+	// An alert presented while the SAML sheet is still being dismissed would be dropped by SwiftUI.
+	func showAlertAfterSheet(_ message: String) {
+		DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+			isLoading = false
+			alertText = message
+			showAlert = true
+		}
+	}
+
+	func completeLogin(_ data: Data) {
+		guard let info = try? JSONDecoder().decode(ClientInfo.self, from: data) else {
+			isLoading = false
+			alertText = "Bad response from the server"
+			showAlert = true
+			return
+		}
+		isLoading = false
+		NetworkHandler.clinfo = info
+
+		// store it and recover it from the next app opening, so people won't swear
+		saveToKeychain(data: data, key: GLBDataModel.shared.SessionKeyChainKey)
+
+		if let c = controller {
+			print("*** Login succeeded! ***")
+			c.setView(.main)
+		}
 	}
 
 	func authenticate(_ tfa: String? = "") {
@@ -184,21 +311,13 @@ struct LoginView: View {
 					let decoder = JSONDecoder()
 
 					if statusCode == 201 { // 201 Created
-						// store it and recover it from the next app opening, so people won't swear
-						guard let info: ClientInfo = try? decoder.decode(ClientInfo.self, from: data) else {
-							alertText = "Bad response from the server"
-							showAlert = true
+						completeLogin(data)
+					} else if statusCode >= 400 { // 4XX client errors
+						if SAMLLogin.isSAMLRequired(data) {
+							showSAMLPrompt(required: true)
 							return
 						}
-						NetworkHandler.clinfo = info
 
-						saveToKeychain(data: data, key: GLBDataModel.shared.SessionKeyChainKey)
-
-						if let c = controller {
-							print("*** Login succeeded! ***")
-							c.setView(.main)
-						}
-					} else if statusCode >= 400 { // 4XX client errors
 						guard let info: ErrorInfo = try? decoder.decode(ErrorInfo.self, from: data) else {
 							alertText = "Login failed (HTTP \(statusCode))"
 							showAlert = true

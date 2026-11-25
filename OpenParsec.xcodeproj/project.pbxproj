@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A27110000000000000000001 /* ConnectionAttemptPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27110000000000000000002 /* ConnectionAttemptPolicy.swift */; };
+		A27110000000000000000003 /* SAMLLogin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A27110000000000000000004 /* SAMLLogin.swift */; };
 		170E0A772BEF5AFF00B0EA32 /* ParsecViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 170E0A762BEF5AFF00B0EA32 /* ParsecViewController.swift */; };
 		17374D412CB8E35D00EDCEE7 /* KeyCodeTranslators.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17374D402CB8E35500EDCEE7 /* KeyCodeTranslators.swift */; };
 		17840D1D2CB639530097374B /* ParsecUserData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17840D1C2CB6394D0097374B /* ParsecUserData.swift */; };
@@ -62,6 +63,7 @@
 
 /* Begin PBXFileReference section */
 		A27110000000000000000002 /* ConnectionAttemptPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionAttemptPolicy.swift; sourceTree = "<group>"; };
+		A27110000000000000000004 /* SAMLLogin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SAMLLogin.swift; sourceTree = "<group>"; };
 		170E0A762BEF5AFF00B0EA32 /* ParsecViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsecViewController.swift; sourceTree = "<group>"; };
 		17374D402CB8E35500EDCEE7 /* KeyCodeTranslators.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCodeTranslators.swift; sourceTree = "<group>"; };
 		17840D1C2CB6394D0097374B /* ParsecUserData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParsecUserData.swift; sourceTree = "<group>"; };
@@ -162,6 +164,7 @@
 				17EEB91B2BEE62BA00502A3A /* KeyBoardTest.swift */,
 				27E61A9C292965FD00FF6563 /* LaunchScreen.storyboard */,
 				27E61AA52929817700FF6563 /* LoginView.swift */,
+				A27110000000000000000004 /* SAMLLogin.swift */,
 				27E61AA92929B92200FF6563 /* MainView.swift */,
 				27ED36FE292D4F9800B1BE3D /* NetworkHandler.swift */,
 				27899AC4292FE2A8001ACA33 /* OpenParsec-Bridging-Header.h */,
@@ -311,6 +314,7 @@
 				27AD36602B19731800C8A607 /* ExUI.swift in Sources */,
 				27899AC7292FE2A9001ACA33 /* audio.c in Sources */,
 				27E61AA62929817700FF6563 /* LoginView.swift in Sources */,
+				A27110000000000000000003 /* SAMLLogin.swift in Sources */,
 				27B8D564292DC7A000A324AD /* CParsec.swift in Sources */,
 				A1B2C3D42F8E000100000012 /* ClipboardSync.swift in Sources */,
 				27A923E229E8FEE900F54BDA /* UIViewControllerWrapper.swift in Sources */,

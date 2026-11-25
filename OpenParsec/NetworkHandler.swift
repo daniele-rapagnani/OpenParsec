@@ -70,10 +70,10 @@ struct ErrorInfo: Decodable {
 }
 
 struct ClientInfo: Decodable {
-	var instance_id: String
-	var user_id: Int
+	var instance_id: String?
+	var user_id: Int?
 	var session_id: String
-	var host_peer_id: String
+	var host_peer_id: String? // SAML sessions only return session_id
 }
 
 struct UserInfo: Decodable {
