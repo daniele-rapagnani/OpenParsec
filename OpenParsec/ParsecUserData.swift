@@ -29,4 +29,5 @@ enum ParsecUserDataType: UInt32 {
 	case getVideoConfig = 9
 	case getAdapterInfo = 10
 	case setVideoConfig = 11
+	case sendCtrlAltDel = 14 // empty payload, the host performs Ctrl+Alt+Del itself (same as the official client's menu item)
 }

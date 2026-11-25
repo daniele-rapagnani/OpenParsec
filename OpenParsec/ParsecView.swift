@@ -593,15 +593,8 @@ struct ParsecView: View {
 						}
 					}
 
-					Menu {
-						Button("Ctrl+Alt+Del") {
-							CParsec.sendKeyCombo([KEY_LCTRL, KEY_LALT, KEY_DELETE])
-						}
-						Button("Ctrl+Alt+End") {
-							CParsec.sendKeyCombo([KEY_LCTRL, KEY_LALT, KEY_END])
-						}
-					} label: {
-						Text("Send Keys")
+					Button(action: { CParsec.sendUserData(type: .sendCtrlAltDel, message: Data()) }) {
+						Text("Send Ctrl+Alt+Del")
 							.padding(8)
 							.frame(maxWidth: .infinity)
 							.multilineTextAlignment(.center)

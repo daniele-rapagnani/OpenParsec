@@ -647,28 +647,6 @@ class ParsecSDKBridge: ParsecService {
 
 	}
 
-	// Press the keys in order, then release them in reverse, e.g. Ctrl+Alt+Del.
-	func sendKeyCombo(_ keyCodes: [ParsecKeycode]) {
-		var mods: UInt32 = 0
-		var press = ParsecMessage()
-		press.type = MESSAGE_KEYBOARD
-		for code in keyCodes {
-			mods |= Self.modifierFlag(code)
-			press.keyboard = ParsecKeyboardMessage(code: code, mod: ParsecKeymod(rawValue: mods), pressed: true, __pad: (0, 0, 0))
-			ParsecClientSendMessage(_parsec, &press)
-		}
-
-		DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-			var release = ParsecMessage()
-			release.type = MESSAGE_KEYBOARD
-			for code in keyCodes.reversed() {
-				mods &= ~Self.modifierFlag(code)
-				release.keyboard = ParsecKeyboardMessage(code: code, mod: ParsecKeymod(rawValue: mods), pressed: false, __pad: (0, 0, 0))
-				ParsecClientSendMessage(self._parsec, &release)
-			}
-		}
-	}
-
 	private static func modifierFlag(_ code: ParsecKeycode) -> UInt32 {
 		switch code {
 		case KEY_LCTRL: return MOD_LCTRL.rawValue
