@@ -236,9 +236,7 @@ struct ParsecStatusBar: View {
 				appNote("[reconnect] live again")
 				ParsecView.getHostUserData()
 				// SDK forgets stream dims on reconnect, re-send them so the frame fills not corners
-				if let vc = parsecViewController {
-					CParsec.setFrame(vc.view.bounds.width, vc.view.bounds.height, UIScreen.main.scale)
-				}
+				parsecViewController?.layoutStream()
 			}
 			if CParsec.runningRenderer != .metal || CACurrentMediaTime() - liveSince! > 6 {
 				pictureBack()
@@ -724,6 +722,8 @@ struct ParsecView: View {
 		let screenSize: CGSize = self.parsecViewController.view.frame.size
 		let scaleFactor = UIScreen.main.nativeScale
 		ParsecResolution.updateClientResolution(width: Int(screenSize.width * scaleFactor), height: Int(screenSize.height * scaleFactor))
+		// with a monitor connected the stream moves there (and asks for its resolution)
+		ExternalDisplayManager.shared.attach(parsecViewController)
 
 		ParsecView.getHostUserData()
 
@@ -772,6 +772,7 @@ struct ParsecView: View {
 	}
 
 	func applyStreamSettings() {
+		ExternalDisplayManager.shared.update()
 		zoomEnabled = SettingsHandler.zoomEnabled
 		parsecViewController.setZoomEnabled(zoomEnabled)
 		parsecViewController.updatePanHandle()
@@ -890,6 +891,7 @@ struct ParsecView: View {
 		CParsec.disconnect()
 		DataManager.model.output = "none"
 		CParsec.drawRate = 0
+		ExternalDisplayManager.shared.detach()
 		self.parsecViewController.glkView.cleanUp()
 
 		parsecViewController.scrollView.zoomScale = 1.0

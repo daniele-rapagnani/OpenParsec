@@ -92,6 +92,18 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	var lastLaidOutWidth: CGFloat = 0
 	var lastLaidOutHeight: CGFloat = 0
 
+	// External display: while set, the render view and cursor live in this monitor view and the
+	// device screen is a trackpad. See ExternalDisplay.swift.
+	private(set) var externalHost: ExternalStreamViewController?
+	private var trackpadHint: UILabel?
+	var isOnExternalDisplay: Bool { externalHost != nil }
+	/// The view the stream is drawn in: the monitor's, else this controller's.
+	var streamView: UIView { externalHost?.view ?? view }
+	/// The screen the stream is shown on.
+	var streamScreen: UIScreen { streamView.window?.screen ?? view.window?.screen ?? UIScreen.main }
+	/// On a monitor the device screen is always a trackpad: Direct has nothing under the finger.
+	var cursorMode: CursorMode { isOnExternalDisplay ? .touchpad : SettingsHandler.cursorMode }
+
 	override var prefersPointerLocked: Bool {
 		return true
 	}
@@ -127,8 +139,8 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	}
 
 	func computeRenderScale() -> CGFloat {
-		let nativeScale = UIScreen.main.nativeScale
-		guard scrollView.zoomScale > 1.01 else { return nativeScale }
+		let nativeScale = isOnExternalDisplay ? streamScreen.scale : streamScreen.nativeScale
+		guard !isOnExternalDisplay, scrollView.zoomScale > 1.01 else { return nativeScale }
 		let vw = glkView.renderView.frame.size.width
 		let vh = glkView.renderView.frame.size.height
 		let sw = CGFloat(CParsec.hostWidth)
@@ -180,7 +192,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			// input-driven). When idle, follow the host's reported cursor so host- or keyboard-
 			// driven moves are reflected and any prediction drift is corrected.
 			if !isDragging && !clickHoldActive && !cursorMomentumActive {
-				let fingerSet = SettingsHandler.cursorMode == .direct
+				let fingerSet = cursorMode == .direct
 					&& abs(cursorContentPos.x - CGFloat(currentMouseX)) < 1
 					&& abs(cursorContentPos.y - CGFloat(currentMouseY)) < 1
 				cursorContentPos = CGPoint(x: CGFloat(currentMouseX), y: CGFloat(currentMouseY))
@@ -201,7 +213,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	}
 
 	func applyFrameRate() {
-		let fps = SettingsHandler.preferredFramesPerSecond == 0 ? UIScreen.main.maximumFramesPerSecond : SettingsHandler.preferredFramesPerSecond
+		let fps = SettingsHandler.preferredFramesPerSecond == 0 ? streamScreen.maximumFramesPerSecond : SettingsHandler.preferredFramesPerSecond
 		(glkView as? ParsecMetalViewController)?.metalView.preferredFramesPerSecond = fps
 		(glkView as? ParsecGLKViewController)?.glkViewController.preferredFramesPerSecond = fps
 	}
@@ -352,10 +364,13 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		// Reset zoom on rotation
 		scrollView.zoomScale = 1.0
 
-		self.glkView.updateSize(width: w, height: h)
 		contentView.frame.size = CGSize(width: w, height: h)
 		scrollView.contentSize = CGSize(width: w, height: h)
-		CParsec.setFrame(w, h, UIScreen.main.scale)
+		// on a monitor, rotating the device doesn't change the stream's size
+		if !isOnExternalDisplay {
+			self.glkView.updateSize(width: w, height: h)
+			CParsec.setFrame(w, h, view.window?.screen.scale ?? UIScreen.main.scale)
+		}
 
         // Reset accessory view to ensure correct width in new orientation
         clearToolbarModifiers(sendToHost: true)
@@ -370,7 +385,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		// glkView/contentView get sized from possibly-stale bounds in viewDidLoad and have no
 		// autoresizing, so the stream renders in a corner until a rotation re-applies the size.
 		// re-apply once layout settles; skip while zoomed so we dont stomp pan/zoom.
-		guard scrollView != nil, scrollView.zoomScale == 1.0 else { return }
+		guard scrollView != nil, scrollView.zoomScale == 1.0, !isOnExternalDisplay else { return }
 		let w = view.bounds.width
 		let h = view.bounds.height
 		guard w > 0, h > 0, w != lastLaidOutWidth || h != lastLaidOutHeight else { return }
@@ -379,7 +394,96 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 		glkView.updateSize(width: w, height: h)
 		contentView.frame.size = CGSize(width: w, height: h)
 		scrollView.contentSize = CGSize(width: w, height: h)
-		CParsec.setFrame(w, h, UIScreen.main.scale)
+		CParsec.setFrame(w, h, view.window?.screen.scale ?? UIScreen.main.scale)
+	}
+
+	/// Sizes the render view to the surface it is on and tells the SDK (also after a reconnect,
+	/// which forgets the stream's dimensions).
+	func layoutStream() {
+		let bounds = streamView.bounds
+		guard bounds.width > 0, bounds.height > 0, glkView.renderView.superview != nil else { return }
+		if isOnExternalDisplay {
+			glkView.updateSize(width: bounds.width, height: bounds.height)
+			glkView.renderView.frame.origin = .zero
+		} else if scrollView.zoomScale == 1.0 {
+			// while zoomed the content keeps its size (the zoom transform scales it)
+			glkView.updateSize(width: bounds.width, height: bounds.height)
+			contentView.frame.size = bounds.size
+			scrollView.contentSize = bounds.size
+		}
+		CParsec.setFrame(bounds.width, bounds.height, streamScreen.scale)
+		appliedRenderScale = 0
+		updateRenderScale()
+		positionCursorOverlay()
+	}
+
+	// MARK: - External display
+
+	/// Moves the stream onto a monitor; this screen becomes the trackpad.
+	func moveStream(to host: ExternalStreamViewController) {
+		guard externalHost == nil else { return }
+		loadViewIfNeeded()
+		flushAllTouches()
+		scrollView.zoomScale = 1.0
+		scrollView.contentOffset = .zero
+		externalHost = host
+		let renderView = glkView.renderView
+		renderView.removeFromSuperview()
+		host.view.addSubview(renderView)
+		renderView.frame = host.view.bounds
+		if let cursor = u {
+			cursor.removeFromSuperview()
+			host.view.addSubview(cursor)
+		}
+		showTrackpadHint(true)
+		layoutStream()
+		applyFrameRate()
+	}
+
+	/// Gives the stream back to this screen (monitor unplugged, setting off, stream closing).
+	func moveStreamBack() {
+		guard externalHost != nil else { return }
+		flushAllTouches()
+		externalHost = nil
+		let renderView = glkView.renderView
+		renderView.removeFromSuperview()
+		contentView.addSubview(renderView)
+		renderView.frame.origin = .zero
+		if let cursor = u {
+			cursor.removeFromSuperview()
+			view.insertSubview(cursor, aboveSubview: touchOverlay)
+		}
+		showTrackpadHint(false)
+		scrollView.zoomScale = 1.0
+		scrollView.contentOffset = .zero
+		pinnedToKeyboard = false
+		scrollView.contentInset.top = 0
+		lastLaidOutWidth = 0
+		lastLaidOutHeight = 0
+		layoutStream()
+		applyFrameRate()
+		view.setNeedsLayout()
+	}
+
+	private func showTrackpadHint(_ visible: Bool) {
+		if visible && trackpadHint == nil {
+			let label = UILabel()
+			label.text = "Streaming to the external display\nUse this screen as a trackpad"
+			label.numberOfLines = 0
+			label.textAlignment = .center
+			label.textColor = UIColor(white: 1, alpha: 0.35)
+			label.font = .preferredFont(forTextStyle: .headline)
+			label.isUserInteractionEnabled = false
+			label.translatesAutoresizingMaskIntoConstraints = false
+			view.insertSubview(label, belowSubview: touchOverlay)
+			NSLayoutConstraint.activate([
+				label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+				label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+				label.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, multiplier: 0.8)
+			])
+			trackpadHint = label
+		}
+		trackpadHint?.isHidden = !visible
 	}
 
 	override func viewDidAppear(_ animated: Bool) {
@@ -557,10 +661,10 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 			}
 			keyboardCoversPicture = height > 0
 			updatePanHandle()
-			if height > 0 && SettingsHandler.cursorMode == .direct {
+			if height > 0 && cursorMode == .direct {
 				onKeyboardCoversPicture?()
 			}
-			if SettingsHandler.cursorMode == .direct {
+			if cursorMode == .direct {
 				let bottomY = max(0, scrollView.contentSize.height - scrollView.bounds.height + height)
 				scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: bottomY), animated: true)
 				onKeyboardVisibilityChanged?(true)
@@ -597,7 +701,7 @@ class ParsecViewController: UIViewController, UIScrollViewDelegate, ParsecTouchI
 	}
 
 	func updatePanHandle() {
-		setPanHandleVisible(keyboardCoversPicture && SettingsHandler.cursorMode == .direct)
+		setPanHandleVisible(keyboardCoversPicture && cursorMode == .direct)
 	}
 
 	func setPanHandleVisible(_ visible: Bool) {
@@ -811,7 +915,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		twoFingerResidual = false
 		cursorDidMoveThisTouch = false
 		singleTouchStartScreen = activeTouches.first?.location(in: view) ?? .zero
-		if SettingsHandler.cursorMode == .direct {
+		if cursorMode == .direct {
 			if let t = activeTouches.first {
 				cursorContentPos = clampToContent(contentView.convert(t.location(in: view), from: view))
 				CParsec.sendMousePosition(Int32(cursorContentPos.x), Int32(cursorContentPos.y))
@@ -822,7 +926,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func endCursorIfNeeded() {
-		if isDragging && SettingsHandler.cursorMode == .direct {
+		if isDragging && cursorMode == .direct {
 			CParsec.sendMouseClickMessage(ParsecMouseButton.init(rawValue: 1), false)
 		}
 	}
@@ -870,7 +974,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			return
 		}
 
-		if SettingsHandler.cursorMode == .direct {
+		if cursorMode == .direct {
 			cursorContentPos = clampToContent(contentView.convert(loc, from: view))
 		} else {
 			// Relative finger movement, predicted locally; sensitivity scales down with zoom so the
@@ -891,7 +995,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		// Command the host to the ABSOLUTE predicted position (not a delta) so the host cursor can't
 		// crawl behind network round-trips - clicks always land where the cursor is drawn.
 		CParsec.sendMousePosition(Int32(cursorContentPos.x), Int32(cursorContentPos.y))
-		if SettingsHandler.cursorMode == .direct {
+		if cursorMode == .direct {
 			edgeScrollPoint = loc
 			if cursorDidMoveThisTouch && edgeScrollVelocity(at: loc) != .zero {
 				if !edgeScrollActive { edgeScrollLastTick = 0 }
@@ -913,7 +1017,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 			let midDelta = hypot(d.midpoint.x - startTwoFingerMidpoint.x, d.midpoint.y - startTwoFingerMidpoint.y)
 			let deadZone: CGFloat = 12.0
 			if distDelta > deadZone || midDelta > deadZone {
-				twoFingerMode = (distDelta > midDelta && zoomEnabled) ? .zoom : .scroll
+				twoFingerMode = (distDelta > midDelta && zoomEnabled && !isOnExternalDisplay) ? .zoom : .scroll
 				twoFingerDidMove = true
 			}
 		}
@@ -947,7 +1051,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func startCursorMomentum() {
-		guard SettingsHandler.cursorMode == .touchpad, !CParsec.mouseInfo.mousePositionRelative else { return }
+		guard cursorMode == .touchpad, !CParsec.mouseInfo.mousePositionRelative else { return }
 		guard CACurrentMediaTime() - lastCursorMoveTime < 0.06 else { return }   // finger was still moving at release
 		guard hypot(cursorVelocity.x, cursorVelocity.y) > flingMinSpeed else { return }
 		// Less glide when zoomed out: at 1x the cursor crosses the screen instead of panning the view.
@@ -1071,8 +1175,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	private func clampToContent(_ p: CGPoint) -> CGPoint {
-		let w = view.bounds.width
-		let h = view.bounds.height
+		let w = streamView.bounds.width
+		let h = streamView.bounds.height
 		return CGPoint(x: min(max(0, p.x), w), y: min(max(0, p.y), h))
 	}
 
@@ -1080,11 +1184,17 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	// drawn at full Cursor Scale (no zoom division) so it stays crisp and constant-sized.
 	func positionCursorOverlay() {
 		guard let u = u else { return }
-		let zoom = scrollView.zoomScale
-		let off = scrollView.contentOffset
+		let onMonitor = isOnExternalDisplay
+		let zoom = onMonitor ? 1 : scrollView.zoomScale
+		let off = onMonitor ? .zero : scrollView.contentOffset
 		let screenX = cursorContentPos.x * zoom - off.x
 		let screenY = cursorContentPos.y * zoom - off.y
-		let cs = CGFloat(SettingsHandler.cursorScale)
+		var cs = CGFloat(SettingsHandler.cursorScale)
+		if onMonitor, CParsec.hostWidth > 0, CParsec.hostHeight > 0 {
+			// on a monitor, draw the cursor at the picture's own scale (as on the host)
+			let b = streamView.bounds
+			cs = min(b.width / CGFloat(CParsec.hostWidth), b.height / CGFloat(CParsec.hostHeight))
+		}
 		let hotX = CGFloat(CParsec.mouseInfo.cursorHotX) * cs
 		let hotY = CGFloat(CParsec.mouseInfo.cursorHotY) * cs
 		let w = CGFloat(CParsec.mouseInfo.cursorWidth) * cs
@@ -1095,10 +1205,10 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	@objc func handleSingleFingerTap(_ gestureRecognizer: UITapGestureRecognizer) {
 		// Only click if the finger stayed put; a moved finger was a cursor nudge, not a tap.
 		if cursorDidMoveThisTouch { return }
-		if SettingsHandler.cursorMode == .direct { return }
+		if cursorMode == .direct { return }
 		let location = gestureRecognizer.location(in: gestureRecognizer.view)
 		let adjustedLocation = contentView.convert(location, from: view)
-		touchController.onTap(typeOfTap: 1, location: adjustedLocation)
+		touchController.onTap(typeOfTap: 1, location: adjustedLocation, direct: false)
 	}
 
 	@objc func handleTwoFingerTap(_ gestureRecognizer: UITapGestureRecognizer) {
@@ -1119,7 +1229,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 		}
 
 		let adjustedLocation = contentView.convert(location, from: view)
-		touchController.onTap(typeOfTap: 3, location: adjustedLocation)
+		touchController.onTap(typeOfTap: 3, location: adjustedLocation, direct: cursorMode == .direct)
 	}
 
 	@objc func handleThreeFinderTap(_ gestureRecognizer: UITapGestureRecognizer) {
@@ -1127,7 +1237,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	@objc func handleLongPress(_ gestureRecognizer: UIGestureRecognizer) {
-		if SettingsHandler.cursorMode != .touchpad {
+		if cursorMode != .touchpad {
 			return
 		}
 		switch gestureRecognizer.state {
@@ -1160,8 +1270,8 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	}
 
 	func keepCursorAboveKeyboard() {
-		guard scrollView.zoomScale <= 1.0, keyboardVisible, scrollView.contentInset.bottom > 0, !pinnedToKeyboard,
-			  SettingsHandler.cursorMode != .direct, let cursor = u, !cursor.isHidden else { return }
+		guard !isOnExternalDisplay, scrollView.zoomScale <= 1.0, keyboardVisible, scrollView.contentInset.bottom > 0, !pinnedToKeyboard,
+			  cursorMode != .direct, let cursor = u, !cursor.isHidden else { return }
 		let visibleBottom = view.bounds.height - keyboardHeight
 		let margin = min(50, max(0, (visibleBottom - cursor.frame.height) / 2 - 1))
 		let maxOffsetY = max(0, scrollView.contentSize.height - scrollView.bounds.height + scrollView.contentInset.bottom)
@@ -1180,7 +1290,7 @@ extension ParsecViewController: UIGestureRecognizerDelegate {
 	// Slides the viewport so the host cursor stays centered on screen while zoomed in,
 	// clamped so the cursor can still reach the true edges of the host screen.
 	func centerViewportOnCursorPos() {
-		guard scrollView.zoomScale > 1.0 else { return }
+		guard !isOnExternalDisplay, scrollView.zoomScale > 1.0 else { return }
 		let zoom = scrollView.zoomScale
 		let bottomInset = keyboardVisible ? keyboardHeight : 0.0
 		let visibleWidth = view.bounds.width

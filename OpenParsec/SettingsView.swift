@@ -155,6 +155,10 @@ struct SettingsView: View {
 									Toggle("", isOn: $settings.enablePiP)
 										.frame(width: 80)
 								}
+								CatItem("Use External Display") {
+									Toggle("", isOn: $settings.useExternalDisplay)
+										.frame(width: 80)
+								}
 								CatItem("Start Muted") {
 									Toggle("", isOn: $settings.startMuted)
 										.frame(width: 80)

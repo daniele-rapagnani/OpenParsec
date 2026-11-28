@@ -15,6 +15,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 	func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
 		// Called when a new scene session is being created.
 		// Use this method to select a configuration to create the new scene with.
+		if connectingSceneSession.role != .windowApplication {
+			// a monitor (HDMI, USB-C, AirPlay): the stream shows there, see ExternalDisplay.swift
+			let configuration = UISceneConfiguration(name: "External Display", sessionRole: connectingSceneSession.role)
+			configuration.delegateClass = ExternalDisplaySceneDelegate.self
+			return configuration
+		}
 		return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
 	}
 

@@ -25,6 +25,7 @@ final class SettingsStore: ObservableObject {
 			"showKeyboardButton": true,
 			"alwaysShowStatus": false,
 			"enablePiP": false,
+			"useExternalDisplay": true,
 			"startMuted": false,
 			"clipboardSync": false,
 			"autoReconnectEnabled": true,
@@ -137,6 +138,11 @@ final class SettingsStore: ObservableObject {
 		set { store(newValue, "enablePiP") }
 	}
 
+	var useExternalDisplay: Bool {
+		get { defaults.bool(forKey: "useExternalDisplay") }
+		set { store(newValue, "useExternalDisplay") }
+	}
+
 	var startMuted: Bool {
 		get { defaults.bool(forKey: "startMuted") }
 		set { store(newValue, "startMuted") }
@@ -197,6 +203,7 @@ struct SettingsHandler {
 	static var showKeyboardButton: Bool { get { SettingsStore.shared.showKeyboardButton } set { SettingsStore.shared.showKeyboardButton = newValue } }
 	static var alwaysShowStatus: Bool { get { SettingsStore.shared.alwaysShowStatus } set { SettingsStore.shared.alwaysShowStatus = newValue } }
 	static var enablePiP: Bool { get { SettingsStore.shared.enablePiP } set { SettingsStore.shared.enablePiP = newValue } }
+	static var useExternalDisplay: Bool { get { SettingsStore.shared.useExternalDisplay } set { SettingsStore.shared.useExternalDisplay = newValue } }
 	static var startMuted: Bool { get { SettingsStore.shared.startMuted } set { SettingsStore.shared.startMuted = newValue } }
 	static var clipboardSync: Bool { get { SettingsStore.shared.clipboardSync } set { SettingsStore.shared.clipboardSync = newValue } }
 	static var autoReconnect: Bool { get { SettingsStore.shared.autoReconnect } set { SettingsStore.shared.autoReconnect = newValue } }
